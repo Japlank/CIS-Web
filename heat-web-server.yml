@@ -62,5 +62,5 @@ resources:
 
             cd /root
             git clone https://github.com/KonGeorgopoulos/CCS.git
-            mv CCS/ccsDemo.html /var/www/html/index.html
+            mv CCS/index.html /var/www/html/index.html
             more /var/www/html/index.html
