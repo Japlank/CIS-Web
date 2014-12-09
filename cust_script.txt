@@ -1,0 +1,10 @@
+            #!/bin/bash
+            sudo -i
+            apt-get update
+            apt-get install apache2 -y
+            apt-get install git -y
+
+            cd /root
+            git clone https://github.com/KonGeorgopoulos/CCS.git
+            mv CCS/index.html /var/www/html/index.html
+            more /var/www/html/index.html
