@@ -220,5 +220,5 @@ resources:
             cd /root
             git clone https://github.com/Japlank/CIS-Web.git
             mv CIS-Web/index.html /var/www/html/index.html
-            mv CIS-Web/flash.png /var/www/html/flash.png
+            mv CIS-Web/flash1.png /var/www/html/flash1.png
             more /var/www/html/index.html
