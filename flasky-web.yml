@@ -141,7 +141,7 @@ resources:
             SECRET_KEY=__flask_secret_key__
             DATABASE_URL=sqlite:////home/flasky/flasky/appdb.sqlite
             MAIL_USERNAME=ciscodevnet1
-            MAIL_PASSWORD=Cisco!23
+            MAIL_PASSWORD=Nope
             FLASKY_ADMIN=ciscodev1@gmail.com
             SSL_DISABLE=1
             EOF
