@@ -5,6 +5,6 @@
             apt-get install git -y
 
             cd /root
-            git clone https://github.com/KonGeorgopoulos/CCS.git
-            mv CCS/index.html /var/www/html/index.html
+            git clone https://github.com/japlank/CIS-Web
+            mv CIS-Web/index.html /var/www/html/index.html
             more /var/www/html/index.html
