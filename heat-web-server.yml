@@ -1,21 +1,76 @@
 heat_template_version: 2013-05-23
 description: >
   A simple Heat template that spins up multiple instances and a private network (HOT template in YAML).
+paramaters:
+  gmail_username:
+    type: string
+    label: Gmail account username
+    description: Username of the Gmail account to use for notifications.
+  gmail_password:
+    type: string
+    label: Gmail account password
+    description: Password of the Gmail account to use for notifications.
+    hidden: true
 
 resources:
-  heat_network_01:
+  wait_condition:
+    type: OS::Heat::WaitCondition
+    properties:
+      handle: { get_resource: wait_handle }
+      count: 1
+      timeout: 600
+
+  wait_handle:
+    type: OS::Heat::WaitConditionHandle
+
+  flask_secret_key:
+    type: OS::Heat::RandomString
+    properties:
+      length: 32
+      sequence: lettersdigits
+
+  flasky_security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: flasky_security_group
+      rules:
+        - protocol: icmp
+        - protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - protocol: tcp
+          port_range_min: 443
+          port_range_max: 443
+        - protocol: tcp
+          port_range_min: 80
+          port_range_max: 80
+
+resources:
+  flasky_network:
     type: OS::Neutron::Net
     properties:
       admin_state_up: true
-      name: heat-network-01
-  heat_subnet_01:
+      name: flasky-network
+  flasky_subnet:
     type: OS::Neutron::Subnet
     properties:
-      name: heat-subnet-01
+      name: flasky-subnet
       cidr: 10.10.10.0/24
       enable_dhcp: true
-      network_id: { get_resource: heat_network_01 }
+      network_id: { get_resource: flasky_network }
       dns_nameservers: [8.8.8.8]
+  general_web_network:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: general-web-network
+  general_web_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: general-web-subnet
+      cidr: 192.168.10.0/24
+      enable_dhcp: true
+      network_id: { get_resource: general_web_network }
   heat_router_01:
     type: OS::Neutron::Router
     properties:
@@ -24,34 +79,136 @@ resources:
   heat_router_01_gw:
     type: OS::Neutron::RouterGateway
     properties:
-      network_id: 68976754-2af4-42f5-b7d0-442970634987
+      network_id: 0653fccb-ec62-4241-9c4c-c3209de43ed2
       router_id: { get_resource: heat_router_01 }
   heat_router_int0:
     type: OS::Neutron::RouterInterface
     properties:
       router_id: { get_resource: heat_router_01 }
-      subnet_id: { get_resource: heat_subnet_01 }
-
-  webapp_port:
+      subnet_id: { get_resource: flasky_subnet }
+  heat_router_int1:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: heat_router_01 }
+      subnet_id: { get_resource: general_web_subnet }
+  flasky_port01:
     type: OS::Neutron::Port
     properties:
       admin_state_up: true
-      network_id: { get_resource: heat_network_01 }
+      network_id: { get_resource: flasky_network }
+  webapp_port02:
+    type: OS::Neutron::Port
+    properties:
+      admin_state_up: true
+      network_id: { get_resource: general_web_network }  
+  flasky_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network_id: 0653fccb-ec62-4241-9c4c-c3209de43ed2
+      port_id: { get_resource: flasky_port01 }
   webapp_floating_ip:
     type: OS::Neutron::FloatingIP
     properties:
-      floating_network_id: 68976754-2af4-42f5-b7d0-442970634987
-      port_id: { get_resource: webapp_port }
+      floating_network_id: 0653fccb-ec62-4241-9c4c-c3209de43ed2
+      port_id: { get_resource: webapp_port02 }
+  flasky-instance:
+    type: OS::Nova::Server
+    properties:
+      name: flasky-instance
+      image: c48362c2-07fa-456d-b56e-02b251ec2495
+      flavor: Micro-Small
+      networks:
+        - port: { get_resource: flasky_port01 }
+      key_name: japlank
+      user_data: |
+            #!/bin/bash -ex
 
+            # install dependencies
+            apt-get update
+            apt-get -y install build-essential python python-dev python-virtualenv nginx supervisor git
+
+            # create a flasky user to run the server process
+            adduser --disabled-password --gecos "" flasky
+
+            # clone flasky from github
+            cd /home/flasky
+            git clone https://github.com/miguelgrinberg/flasky.git
+            cd flasky
+
+            # Write configuration file
+            cat >.env <<EOF
+            FLASK_CONFIG=heroku
+            SECRET_KEY=__flask_secret_key__
+            DATABASE_URL=sqlite:////home/flasky/flasky/appdb.sqlite
+            MAIL_USERNAME=ciscodevnet1
+            MAIL_PASSWORD=Cisco!23
+            FLASKY_ADMIN=ciscodev1@gmail.com
+            SSL_DISABLE=1
+            EOF
+
+            # create a virtualenv and install dependencies
+            virtualenv venv
+            venv/bin/pip install -r requirements/prod.txt
+            venv/bin/pip install gunicorn==18.0
+
+            # create database
+            venv/bin/python manage.py deploy
+
+            # make the flasky user the owner of the application
+            chown -R flasky:flasky ./
+
+            # configure supervisor to run a private gunicorn web server, and
+            # to autostart it on boot and when it crashes
+            # stdout and stderr logs from the server will go to /var/log/flasky
+            mkdir /var/log/flasky
+            cat >/etc/supervisor/conf.d/flasky.conf <<EOF
+            [program:flasky]
+            command=/home/flasky/flasky/venv/bin/gunicorn -b 127.0.0.1:8000 -w 4 --chdir /home/flasky/flasky --log-file - manage:app
+            user=flasky
+            autostart=true
+            autorestart=true
+            stderr_logfile=/var/log/flasky/stderr.log
+            stdout_logfile=/var/log/flasky/stdout.log
+            EOF
+            supervisorctl reread
+            supervisorctl update
+
+            # configure nginx as the front-end web server with a reverse proxy
+            # rule to the gunicorn server
+            cat >/etc/nginx/sites-available/flasky <<EOF
+            server {
+                listen 80;
+                server_name _;
+                access_log /var/log/nginx/flasky.access.log;
+                error_log /var/log/nginx/flasky.error.log;
+                location / {
+                    proxy_pass http://127.0.0.1:8000;
+                    proxy_redirect off;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                }
+                location /static {
+                    alias /home/flasky/flasky/static;
+                }
+                location /favicon.ico {
+                    alias /home/flasky/flasky/favicon.ico;
+                }
+            }
+            EOF
+            rm -f /etc/nginx/sites-enabled/default
+            ln -s /etc/nginx/sites-available/flasky /etc/nginx/sites-enabled/
+            service nginx restart
+            wc_notify --data-binary '{"status": "SUCCESS"}'
   web-app-instance:
     type: OS::Nova::Server
     properties:
       name: web-app-instance
-      image: 2eb9dacc-f5bc-4972-98a9-e3421f8fba7c
+      image: c48362c2-07fa-456d-b56e-02b251ec2495
       flavor: Micro-Small
       networks:
-        - port: { get_resource: webapp_port }
-      key_name: kgeorgop
+        - port: { get_resource: webapp_port02 }
+      key_name: japlank
       user_data: |
             #!/bin/bash
 
@@ -61,6 +218,6 @@ resources:
             apt-get install git -y
 
             cd /root
-            git clone https://github.com/KonGeorgopoulos/CCS.git
-            mv CCS/index.html /var/www/html/index.html
+            git clone https://github.com/Japlank/CIS-Web.git
+            mv CIS-Web/index.html /var/www/html/index.html
             more /var/www/html/index.html
