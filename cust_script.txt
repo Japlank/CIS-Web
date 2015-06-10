@@ -7,4 +7,5 @@
             cd /root
             git clone https://github.com/japlank/CIS-Web
             mv CIS-Web/index.html /var/www/html/index.html
+            mv CIS-Web/flash.jpg /var/www/html/flash.jpg
             more /var/www/html/index.html
